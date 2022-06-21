@@ -1,9 +1,18 @@
 [package]
 name = "rust"
+description = "Automate extracting information and sending commands to CS:GO via -netconport"
+repository = "https://github.com/Douile/csgo-netcontool"
+license = "MIT"
 version = "0.1.0"
 edition = "2021"
+categories = ["command-line-utilities"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 derive_builder = "0.11"
+tokio = { version = "1.19", features = [ "full" ] }
+async-channel = "1.6"
+bytes = "1.0"
+async-recursion = "1.0"
+strum = { version = "0.24", features = ["derive"] }
