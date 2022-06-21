@@ -9,9 +9,13 @@ categories = ["command-line-utilities"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+rpc = ["dep:discord-presence"]
+
 [dependencies]
 derive_builder = "0.11"
 tokio = { version = "1.19", features = [ "full" ] }
 async-channel = "1.6"
 bytes = "1.0"
 strum = { version = "0.24", features = ["derive"] }
+discord-presence = { version = "0.5", optional = true }

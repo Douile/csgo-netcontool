@@ -4,7 +4,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use super::GenericResult;
 use crate::LineReader;
 
-#[derive(Debug, PartialEq, EnumDiscriminants)]
+#[derive(Debug, Clone, PartialEq, EnumDiscriminants)]
 pub enum Status {
     NotConnected,
     Connected(StatusData),
@@ -16,7 +16,7 @@ impl Status {
     }
 }
 
-#[derive(Debug, PartialEq, derive_builder::Builder)]
+#[derive(Debug, Clone, PartialEq, derive_builder::Builder)]
 pub struct StatusData {
     pub hostname: String,
     pub version: String,
@@ -65,7 +65,9 @@ impl StatusData {
             }
 
             if let Some(map) = line.strip_prefix("map     : ") {
-                builder.map(map.trim().to_string());
+                if let Some((map, _)) = map.split_once(' ') {
+                    builder.map(map.trim().to_string());
+                }
                 continue;
             }
 

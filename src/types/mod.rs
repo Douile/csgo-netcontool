@@ -11,3 +11,4 @@ pub use self::status::{Status, StatusData, StatusDiscriminants};
 pub use self::ui_state::UIState;
 
 pub type GenericResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
+pub type StateListener = fn(State) -> ();

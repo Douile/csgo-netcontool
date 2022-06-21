@@ -6,17 +6,21 @@ use tokio::net::TcpStream;
 use tokio::time::sleep;
 
 pub mod constants;
+#[cfg(feature = "rpc")]
+mod discord;
 pub mod reader;
 pub mod stream_reader;
 pub mod types;
 use crate::constants::{PORT, TICK_COMMAND, TICK_TIME};
 use crate::reader::LineReader;
 use crate::stream_reader::stream_reader;
-use crate::types::{Event, EventDiscriminants, GenericResult, State, StatusDiscriminants, UIState};
+use crate::types::{
+    DamageDirection, Event, EventDiscriminants, GenericResult, State, StateListener, Status,
+    StatusDiscriminants, UIState,
+};
 
 #[tokio::main]
 async fn main() -> GenericResult<()> {
-    let mut state = State::default();
     let (tx, rx) = async_channel::unbounded();
 
     // Make connection
@@ -39,6 +43,10 @@ async fn main() -> GenericResult<()> {
     let (rd, _) = tokio::io::split(stream);
     let line_reader = LineReader::new(rd);
 
+    let mut listeners: Vec<StateListener> = Vec::new();
+    #[cfg(feature = "rpc")]
+    discord::register_listener(&mut listeners);
+
     eprintln!("Connected...");
 
     {
@@ -48,6 +56,9 @@ async fn main() -> GenericResult<()> {
             ()
         });
     }
+
+    let mut state = State::default();
+    call_state_update_listeners(&listeners, &state);
 
     tokio::spawn(async move {
         let mut tick_no = 0u8;
@@ -70,17 +81,45 @@ async fn main() -> GenericResult<()> {
                     "toggle" => state.enabled = !state.enabled,
                     _ => {
                         eprintln!("Sending command {:?}", command);
-                        let mut cmd_conn = TcpStream::connect(&addr).await?;
-                        cmd_conn
-                            .write_all(&format!("{}\n", command).into_bytes())
-                            .await?;
+                        send_command(&addr, &format!("{}\n", command).into_bytes()).await?;
                     }
                 },
                 Event::ChangeUIState(_, new_state) => {
                     state.ui_state = new_state;
+                    if state.ui_state == UIState::MainMenu {
+                        state.map = None;
+                        state.clear_game_data();
+                    }
+                    if state.ui_state == UIState::InGame
+                        && state.status.is_variant(StatusDiscriminants::NotConnected)
+                    {
+                        send_command(&addr, b"status\n").await?;
+                    }
+                    call_state_update_listeners(&listeners, &state);
                 }
                 Event::Status(new_status) => {
                     state.status = new_status;
+                    if let Status::Connected(data) = &state.status {
+                        state.map = Some(data.map.clone());
+                    } else {
+                        state.clear_game_data();
+                    }
+                    call_state_update_listeners(&listeners, &state);
+                }
+                Event::MapChange(map) => {
+                    state.clear_game_data();
+                    state.map = Some(map);
+                    call_state_update_listeners(&listeners, &state);
+                }
+                Event::EnterBuyPeriod => {
+                    state.round += 1;
+                    call_state_update_listeners(&listeners, &state);
+                }
+                Event::Damage(damage) => {
+                    if damage.direction == DamageDirection::Given {
+                        state.total_damage += u8::max(damage.amount, 100) as u64;
+                        call_state_update_listeners(&listeners, &state);
+                    }
                 }
                 Event::Tick(_)
                     if state.enabled
@@ -88,11 +127,23 @@ async fn main() -> GenericResult<()> {
                         && state.status.is_variant(StatusDiscriminants::Connected) =>
                 {
                     eprintln!("InGame tick");
-                    let mut cmd_conn = TcpStream::connect(&addr).await?;
-                    cmd_conn.write_all(TICK_COMMAND).await?;
+                    send_command(&addr, TICK_COMMAND).await?;
                 }
                 _ => {}
             }
         }
+    }
+}
+
+async fn send_command(addr: &SocketAddr, data: &[u8]) -> tokio::io::Result<()> {
+    let mut cmd_conn = TcpStream::connect(addr).await?;
+    cmd_conn.write_all(data).await?;
+    Ok(())
+}
+
+fn call_state_update_listeners(listeners: &Vec<StateListener>, state: &State) -> () {
+    for listener in listeners {
+        let state = state.clone();
+        listener(state);
     }
 }
