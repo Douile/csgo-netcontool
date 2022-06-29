@@ -11,6 +11,7 @@ pub enum Event {
     PlayerConnected(String),
     EnterBuyPeriod,
     Status(Status),
+    ConVar(String, String),
     Tick(u8),
 }
 

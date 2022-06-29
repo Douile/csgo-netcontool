@@ -15,8 +15,8 @@ use crate::constants::{PORT, TICK_COMMAND, TICK_TIME};
 use crate::reader::LineReader;
 use crate::stream_reader::stream_reader;
 use crate::types::{
-    DamageDirection, Event, EventDiscriminants, GenericResult, State, StateListener, Status,
-    StatusDiscriminants, UIState,
+    DamageDirection, Event, EventDiscriminants, GameMode, GameType, GenericResult, State,
+    StateListener, Status, StatusDiscriminants, UIState,
 };
 
 #[tokio::main]
@@ -79,6 +79,14 @@ async fn main() -> GenericResult<()> {
             match event {
                 Event::Command(command) => match command.as_str() {
                     "toggle" => state.enabled = !state.enabled,
+                    "start" => {
+                        state.clear_game_data(state.map.clone());
+                        call_state_update_listeners(&listeners, &state);
+                    }
+                    "addround" => {
+                        state.round += 1;
+                        call_state_update_listeners(&listeners, &state);
+                    }
                     _ => {
                         eprintln!("Sending command {:?}", command);
                         send_command(&addr, &format!("{}\n", command).into_bytes()).await?;
@@ -87,8 +95,7 @@ async fn main() -> GenericResult<()> {
                 Event::ChangeUIState(_, new_state) => {
                     state.ui_state = new_state;
                     if state.ui_state == UIState::MainMenu {
-                        state.map = None;
-                        state.clear_game_data();
+                        state.clear_game_data(None);
                     }
                     if state.ui_state == UIState::InGame
                         && state.status.is_variant(StatusDiscriminants::NotConnected)
@@ -102,13 +109,12 @@ async fn main() -> GenericResult<()> {
                     if let Status::Connected(data) = &state.status {
                         state.map = Some(data.map.clone());
                     } else {
-                        state.clear_game_data();
+                        state.clear_game_data(None);
                     }
                     call_state_update_listeners(&listeners, &state);
                 }
                 Event::MapChange(map) => {
-                    state.clear_game_data();
-                    state.map = Some(map);
+                    state.clear_game_data(Some(map));
                     call_state_update_listeners(&listeners, &state);
                 }
                 Event::EnterBuyPeriod => {
@@ -117,8 +123,32 @@ async fn main() -> GenericResult<()> {
                 }
                 Event::Damage(damage) => {
                     if damage.direction == DamageDirection::Given {
-                        state.total_damage += u8::max(damage.amount, 100) as u64;
-                        call_state_update_listeners(&listeners, &state);
+                        state.total_damage_given += u8::max(damage.amount, 100) as u64;
+                    } else {
+                        state.total_damage_taken += u8::max(damage.amount, 100) as u64;
+                    }
+                    call_state_update_listeners(&listeners, &state);
+                }
+                Event::ConVar(name, value) => {
+                    if name == "game_type" {
+                        if let Ok(value) = u8::from_str_radix(&value, 10) {
+                            if let Some(game_type) = GameType::try_from(value) {
+                                state.game_type = game_type;
+                                call_state_update_listeners(&listeners, &state);
+                                continue;
+                            }
+                        }
+                    }
+                    if name == "game_mode" {
+                        if let Ok(value) = u8::from_str_radix(&value, 10) {
+                            if let Some(game_mode) =
+                                GameMode::try_from((state.game_type.clone(), value))
+                            {
+                                state.game_mode = game_mode;
+                                call_state_update_listeners(&listeners, &state);
+                                continue;
+                            }
+                        }
                     }
                 }
                 Event::Tick(_)

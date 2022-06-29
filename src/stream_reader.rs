@@ -57,17 +57,47 @@ pub async fn stream_reader<T: AsyncRead + Send>(
         }
 
         if let Some(hostname) = line.strip_prefix("hostname: ") {
-            if let Ok(status) = StatusData::parse(hostname.to_string(), &mut line_reader).await {
-                chan.send(Event::Status(Status::Connected(status))).await?;
+            match StatusData::parse(hostname.to_string(), &mut line_reader).await {
+                Ok(status) => chan.send(Event::Status(Status::Connected(status))).await?,
+                Err(e) => eprintln!("Error parsing status {:?}", e),
             }
             continue;
         }
 
         if let Ok(damage) = Damage::try_from(line) {
             chan.send(Event::Damage(damage)).await?;
+            continue;
         } else if line.starts_with("Damage") {
             // FIXME: Ignore
             eprintln!("{:?} {:?}", line, Damage::try_from(line));
+        }
+
+        if let Some(line) = line.strip_prefix("\"") {
+            if let Some((var_name, line)) = line.split_once('"') {
+                if let Some(line) = line.strip_prefix(" = \"") {
+                    if let Some((var_value, _)) = line.split_once('"') {
+                        let (var_name, var_value) = (var_name.trim(), var_value.trim());
+                        if var_name.len() > 0 && var_value.len() > 0 {
+                            chan.send(Event::ConVar(var_name.to_string(), var_value.to_string()))
+                                .await?;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some((var_name, var_value)) = line.split_once(" - ") {
+            let (var_name, var_value) = (var_name.trim(), var_value.trim());
+            if var_name.len() > 0
+                && var_value.len() > 0
+                && !var_name.contains(' ')
+                && !var_value.contains(' ')
+            {
+                chan.send(Event::ConVar(var_name.to_string(), var_value.to_string()))
+                    .await?;
+                continue;
+            }
         }
 
         if let Some(command) = line.strip_prefix("??? ") {
